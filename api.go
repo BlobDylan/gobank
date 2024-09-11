@@ -16,6 +16,8 @@ import (
 func (s *APIServer) Run() {
 	router := mux.NewRouter()
 
+	router.HandleFunc("/login", makeHTTPHandlerFunc(s.HandleLogin))
+
 	router.HandleFunc("/account", makeHTTPHandlerFunc(s.HandleAccount))
 
 	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandlerFunc(s.HandleAccountByID), s.db))
@@ -25,6 +27,25 @@ func (s *APIServer) Run() {
 	log.Println("Starting server on", s.listenAddr)
 
 	http.ListenAndServe(s.listenAddr, router)
+}
+
+func (s *APIServer) HandleLogin(w http.ResponseWriter, r *http.Request) error {
+	if r.Method != http.MethodPost {
+		return fmt.Errorf("unsupported method %s", r.Method)
+	}
+	var req loginrequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return err
+	}
+
+	acc, err := s.db.GetAccountByEmail(req.Email)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Account => %+v\n", acc)
+
+	return WriteJSON(w, http.StatusOK, req)
 }
 
 func (s *APIServer) HandleAccount(w http.ResponseWriter, r *http.Request) error {
@@ -89,17 +110,14 @@ func (s *APIServer) HandleCreateAccount(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 
-	account := NewAccount(accReq.Email)
-	if err := s.db.CreateAccount(account); err != nil {
-		return err
-	}
-
-	tokenstring, err := createJWTToken(account)
+	account, err := NewAccount(accReq.Email, accReq.Password)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("Token:", tokenstring)
+	if err := s.db.CreateAccount(account); err != nil {
+		return err
+	}
 
 	return WriteJSON(w, http.StatusCreated, account)
 }
