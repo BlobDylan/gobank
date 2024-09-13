@@ -92,6 +92,18 @@ func (s *postgresStorage) DeleteAccount(id int) error {
 }
 
 func (s *postgresStorage) Transfer(from, to int, amount int64) error {
+	queryremove := `UPDATE accounts SET balance = balance - $1 WHERE number = $2`
+	queryadd := `UPDATE accounts SET balance = balance + $1 WHERE number = $2`
+
+	_, err := s.db.Exec(queryremove, amount, from)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(queryadd, amount, to)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

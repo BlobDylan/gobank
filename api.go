@@ -10,6 +10,7 @@ import (
 
 	jwt "github.com/golang-jwt/jwt/v4"
 	"github.com/gorilla/mux"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2NvdW50TnVtYmVyIjo1OTMxLCJleHBpcmVzQXQiOjE1MDAwMH0.qUyEtqJu7jGyCEPAwVWNsojaO-h7Bw53U3idAEDSYpo
@@ -22,7 +23,7 @@ func (s *APIServer) Run() {
 
 	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandlerFunc(s.HandleAccountByID), s.db))
 
-	router.HandleFunc("/transfer", makeHTTPHandlerFunc(s.HandleTransfer))
+	router.HandleFunc("/transfer/{id}", withJWTAuth(makeHTTPHandlerFunc(s.HandleTransfer), s.db))
 
 	log.Println("Starting server on", s.listenAddr)
 
@@ -43,9 +44,19 @@ func (s *APIServer) HandleLogin(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
+	if err := bcrypt.CompareHashAndPassword([]byte(acc.EncryptedPwd), []byte(req.Password)); err != nil {
+		WriteJSON(w, http.StatusUnauthorized, ApiError{Error: "Unauthorized"})
+		return err
+	}
+
+	token, err := createJWTToken(acc)
+	if err != nil {
+		return err
+	}
+
 	fmt.Printf("Account => %+v\n", acc)
 
-	return WriteJSON(w, http.StatusOK, req)
+	return WriteJSON(w, http.StatusOK, token)
 }
 
 func (s *APIServer) HandleAccount(w http.ResponseWriter, r *http.Request) error {
@@ -129,6 +140,20 @@ func (s *APIServer) HandleTransfer(w http.ResponseWriter, r *http.Request) error
 	}
 	defer r.Body.Close()
 
+	fromID, err := getIDFromRequest(r)
+	if err != nil {
+		return err
+	}
+
+	fromAccount, err := s.db.GetAccount(fromID)
+	if err != nil {
+		return err
+	}
+
+	if err := s.db.Transfer(int(fromAccount.Number), transferreq.To, transferreq.Amount); err != nil {
+		return err
+	}
+
 	return WriteJSON(w, http.StatusOK, transferreq)
 }
 
@@ -150,6 +175,7 @@ func withJWTAuth(handlerFunc http.HandlerFunc, db storage) http.HandlerFunc {
 			Unauthorized(w, err)
 			return
 		}
+
 		userID, err := getIDFromRequest(r)
 		if err != nil {
 			Unauthorized(w, err)
